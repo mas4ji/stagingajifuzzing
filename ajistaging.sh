@@ -98,42 +98,74 @@ done
 # Run dependencies check
 check_dependencies
 
+# Create folder for domain output
+create_domain_folder() {
+    if [ ! -d "$home_dir/$domain" ]; then
+        mkdir "$home_dir/$domain"
+    fi
+}
+
 # Step 1: Subdomain scanning with Subfinder (if -s option used)
 if [ -n "$subdomain" ]; then
     echo "Menjalankan Subfinder pada $subdomain..."
-    subfinder -d "$subdomain" -o "$home_dir/subdomains.txt"
-    echo "Subdomain yang ditemukan disimpan di $home_dir/subdomains.txt"
+    create_domain_folder
+    subfinder -d "$subdomain" -o "$home_dir/$subdomain/subdomains.txt"
+    echo "Subdomain yang ditemukan disimpan di $home_dir/$subdomain/subdomains.txt"
+
+    # Step 2: ParamSpider untuk subdomain
+    echo "Menjalankan ParamSpider pada subdomain $subdomain..."
+    python3 "$home_dir/ParamSpider/paramspider.py" -d "$subdomain" --exclude "$excluded_extentions" --level high --quiet -o "$home_dir/$subdomain/subdomains_output.txt"
+
+    # Step 3: Nuclei untuk subdomain hasil paramspider
+    echo "Menjalankan Nuclei pada subdomain hasil ParamSpider..."
+    httpx -silent -mc 200,301,302,403 -l "$home_dir/$subdomain/subdomains_output.txt" -o "$home_dir/$subdomain/live_urls.txt"
+    nuclei -l "$home_dir/$subdomain/live_urls.txt" -t "$home_dir/nuclei-templates" -dast -rl 05
+
 fi
 
-# Step 2: Run ParamSpider for URL collection
-echo "Menjalankan ParamSpider..."
+# Step 2: Run ParamSpider for URL collection (if -d or -f option used)
 if [ -n "$domain" ]; then
-    python3 "$home_dir/ParamSpider/paramspider.py" -d "$domain" --exclude "$excluded_extentions" --level high --quiet -o "$home_dir/output/$domain.yaml"
-elif [ -n "$filename" ]; then
+    create_domain_folder
+    echo "Menjalankan ParamSpider untuk $domain..."
+    python3 "$home_dir/ParamSpider/paramspider.py" -d "$domain" --exclude "$excluded_extentions" --level high --quiet -o "$home_dir/$domain/paramspider_output.txt"
+
+    # Step 3: HTTPx untuk mendapatkan URL hidup
+    echo "Menjalankan HTTPx pada URL yang dikumpulkan..."
+    httpx -silent -mc 200,301,302,403 -l "$home_dir/$domain/paramspider_output.txt" -o "$home_dir/$domain/live_urls.txt"
+
+    # Step 4: Nuclei pada URL yang ditemukan
+    echo "Menjalankan Nuclei pada URL yang ditemukan..."
+    nuclei -l "$home_dir/$domain/live_urls.txt" -t "$home_dir/nuclei-templates" -dast -rl 05
+fi
+
+# Step 2: Run ParamSpider for multiple URLs from file (if -f option used)
+if [ -n "$filename" ]; then
     while IFS= read -r line; do
-        python3 "$home_dir/ParamSpider/paramspider.py" -d "$line" --exclude "$excluded_extentions" --level high --quiet -o "$home_dir/output/${line}.yaml"
+        create_domain_folder
+        echo "Menjalankan ParamSpider pada $line..."
+        python3 "$home_dir/ParamSpider/paramspider.py" -d "$line" --exclude "$excluded_extentions" --level high --quiet -o "$home_dir/$line/paramspider_output.txt"
+
+        # Step 3: HTTPx untuk mendapatkan URL hidup
+        echo "Menjalankan HTTPx pada $line..."
+        httpx -silent -mc 200,301,302,403 -l "$home_dir/$line/paramspider_output.txt" -o "$home_dir/$line/live_urls.txt"
+
+        # Step 4: Nuclei pada URL yang ditemukan
+        echo "Menjalankan Nuclei pada $line..."
+        nuclei -l "$home_dir/$line/live_urls.txt" -t "$home_dir/nuclei-templates" -dast -rl 05
     done < "$filename"
 fi
 
-# Check if ParamSpider generated any output
-if [ ! -d "$home_dir/output" ] || [ ! "$(ls -A "$home_dir/output")" ]; then
-    echo -e "${RED}ERROR: Tidak ada output dari ParamSpider!${RESET}"
-    exit 1
+# Parallel execution with -x
+if [ "$parallel" == "true" ]; then
+    echo "Menjalankan pemindaian secara paralel..."
+    if [ -n "$subdomain" ]; then
+        subfinder -d "$subdomain" -o "$home_dir/$subdomain/subdomains.txt" &
+        python3 "$home_dir/ParamSpider/paramspider.py" -d "$subdomain" --exclude "$excluded_extentions" --level high --quiet -o "$home_dir/$subdomain/subdomains_output.txt" &
+        wait
+    elif [ -n "$domain" ]; then
+        python3 "$home_dir/ParamSpider/paramspider.py" -d "$domain" --exclude "$excluded_extentions" --level high --quiet -o "$home_dir/$domain/paramspider_output.txt" &
+        wait
+    fi
 fi
 
-# Step 3: HTTPx to get live URLs
-echo "Menjalankan HTTPx pada URL yang dikumpulkan..."
-httpx -silent -mc 200,301,302,403 -l "$home_dir/output"/* -o "$home_dir/live_urls.txt"
-
-# Check if HTTPx found any live URLs
-if [ ! -f "$home_dir/live_urls.txt" ] || [ ! -s "$home_dir/live_urls.txt" ]; then
-    echo -e "${RED}ERROR: Tidak ada URL hidup yang ditemukan!${RESET}"
-    exit 1
-fi
-
-# Step 4: Run Nuclei on live URLs
-echo "Menjalankan Nuclei pada URL yang ditemukan..."
-nuclei -l "$home_dir/live_urls.txt" -t "$home_dir/nuclei-templates" -dast -rl 05
-
-# Finish the scan
 echo "Pemindaian selesai - Selamat Fuzzing!"
