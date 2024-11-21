@@ -9,12 +9,12 @@ RESET='\033[0m'
 echo -e "${GREEN}"
 cat << "EOF"
 
-   __       _._  ______ ________._ ___    ___ 
-  /  _  \     |_|| \   __/    |   \_    /\__    /|   |\      \  /  ___/ 
- /  /\  \    |  |  |  |    _) |    |   / /     /   /     / |   |/   |   \/   \  _ 
+   _____       __.__  _______________ _______________________.___ _______    ________ 
+  /  _  \     |__|__| \_   _____/    |   \____    /\____    /|   |\      \  /  _____/ 
+ /  /_\  \    |  |  |  |    __) |    |   / /     /   /     / |   |/   |   \/   \  ___ 
 /    |    \   |  |  |  |     \  |    |  / /     /_  /     /_ |   /    |    \    \_\  \
-\_|_  /\_|  ||  \_  /  |__/ /__ \/___ \|_\_|_  /\__  /
-        \/\__|         \/                    \/        \/            \/        \/   v1.0.0
+\____|__  /\__|  |__|  \___  /  |______/ /_______ \/_______ \|___\____|__  /\______  /
+        \/\______|         \/                    \/        \/            \/        \/   v1.0.0
 
                                Dibuat oleh Muhammad Fazriansyah (mas4ji)
 EOF
@@ -28,32 +28,34 @@ display_help() {
     echo "  -h, --help              Menampilkan informasi bantuan"
     echo "  -d, --domain <domain>   Satu domain untuk dipindai kerentanannya XSS, SQLi, SSRF, Open-Redirect, dll."
     echo "  -f, --file <filename>   File yang berisi beberapa domain/URL untuk dipindai"
-    echo "  -S, --subfinder-paramspider"
-    echo "                          Jalankan Subfinder untuk mengumpulkan subdomain, ParamSpider untuk parameter, lalu scan dengan Nuclei."
+    echo "  -s, --subdomain <domain> Menjalankan Subfinder → ParamSpider → Nuclei pada domain"
+    echo "  -x, --parallel          Menjalankan pemindaian secara paralel menggunakan xargs"
     exit 0
 }
 
-# Mendapatkan direktori home pengguna
-home_dir=$(eval echo ~"$USER")
-
-# Ekstensi yang dikecualikan
-excluded_extentions="png,jpg,gif,jpeg,swf,woff,svg,pdf,json,css,js,webp,woff,woff2,eot,ttf,otf,mp4,txt"
-
-# Mengecek apakah Subfinder, ParamSpider, dan Nuclei terpasang
-if ! command -v subfinder &> /dev/null; then
-    echo "Menginstal Subfinder..."
-    go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
-fi
-
-if [ ! -d "$home_dir/ParamSpider" ]; then
-    echo "Meng-clone ParamSpider..."
-    git clone https://github.com/mas4ji/ParamSpider "$home_dir/ParamSpider"
-fi
-
-if ! command -v nuclei &> /dev/null; then
-    echo "Menginstal Nuclei..."
-    go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
-fi
+# Memeriksa apakah subfinder, ParamSpider, Nuclei dan httpx sudah terpasang
+check_dependencies() {
+    # Memeriksa subfinder
+    if ! command -v subfinder &> /dev/null; then
+        echo "Menginstal Subfinder..."
+        go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+    fi
+    # Memeriksa ParamSpider
+    if [ ! -d "$home_dir/ParamSpider" ]; then
+        echo "Meng-clone ParamSpider..."
+        git clone https://github.com/mas4ji/ParamSpider "$home_dir/ParamSpider"
+    fi
+    # Memeriksa nuclei
+    if ! command -v nuclei &> /dev/null; then
+        echo "Menginstal Nuclei..."
+        go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+    fi
+    # Memeriksa httpx
+    if ! command -v httpx &> /dev/null; then
+        echo "Menginstal httpx..."
+        go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
+    fi
+}
 
 # Parsing argumen baris perintah
 while [[ $# -gt 0 ]]
@@ -73,53 +75,78 @@ do
             shift
             shift
             ;;
-        -S|--subfinder-paramspider)
-            scan_domain="$2"
+        -s|--subdomain)
+            subdomain="$2"
             shift
             shift
             ;;
-        *)
+        -x|--parallel)
+            parallel_mode=true
+            shift
+            ;;
+        * )
             echo "Opsi tidak dikenal: $key"
             display_help
             ;;
     esac
 done
 
-# Langkah jika opsi -S digunakan
-if [ -n "$scan_domain" ]; then
-    echo -e "${GREEN}[+] Menggunakan Subfinder untuk mencari subdomain dari $scan_domain...${RESET}"
-    subdomains_output="output/${scan_domain}_subdomains.txt"
-    subfinder -d "$scan_domain" -silent -o "$subdomains_output"
+# Menentukan direktori home pengguna
+home_dir=$(eval echo ~"$USER")
 
-    if [ ! -s "$subdomains_output" ]; then
-        echo -e "${RED}[-] Tidak ada subdomain ditemukan untuk $scan_domain. Keluar...${RESET}"
-        exit 1
+# Memeriksa dependencies
+check_dependencies
+
+# Langkah 1: Menjalankan untuk satu domain
+if [ -n "$domain" ]; then
+    echo "Memulai pemindaian untuk domain $domain..."
+    # Langkah 2: Menjalankan ParamSpider untuk domain utama
+    python3 "$home_dir/ParamSpider/paramspider.py" -d "$domain" --level high --exclude 'png,jpg,gif,jpeg,swf,woff,svg,pdf,json,css,js,webp' --quiet -o "output/$domain.yaml"
+    
+    # Langkah 3: Menjalankan Nuclei pada hasil ParamSpider
+    echo "Menjalankan Nuclei pada hasil ParamSpider untuk domain $domain..."
+    httpx -silent -mc 200,301,302,403 -l "output/$domain.yaml" | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05
+
+# Langkah 2: Menjalankan untuk file yang berisi beberapa domain
+elif [ -n "$filename" ]; then
+    echo "Memulai pemindaian untuk beberapa domain dari file $filename..."
+    while IFS= read -r line; do
+        echo "Menjalankan ParamSpider pada $line..."
+        python3 "$home_dir/ParamSpider/paramspider.py" -d "$line" --level high --exclude 'png,jpg,gif,jpeg,swf,woff,svg,pdf,json,css,js,webp' --quiet -o "output/$line.yaml"
+        echo "Menjalankan Nuclei pada hasil ParamSpider untuk $line..."
+        httpx -silent -mc 200,301,302,403 -l "output/$line.yaml" | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05
+    done < "$filename"
+
+# Langkah 3: Menjalankan untuk subdomain (subfinder → paramspider → nuclei)
+elif [ -n "$subdomain" ]; then
+    echo "Menjalankan Subfinder untuk domain $subdomain..."
+    subfinder -d "$subdomain" -o "output/$subdomain_subdomains.txt"
+    
+    # Langkah 2: Menjalankan ParamSpider untuk subdomain yang ditemukan
+    echo "Menjalankan ParamSpider pada subdomain yang ditemukan..."
+    if [ "$parallel_mode" = true ]; then
+        cat "output/$subdomain_subdomains.txt" | xargs -n 1 -P 10 -I {} bash -c "python3 $home_dir/ParamSpider/paramspider.py -d {} --level high --exclude 'png,jpg,gif,jpeg,swf,woff,svg,pdf,json,css,js,webp' --quiet -o 'output/{}.yaml'"
+    else
+        cat "output/$subdomain_subdomains.txt" | while IFS= read -r sub; do
+            python3 "$home_dir/ParamSpider/paramspider.py" -d "$sub" --level high --exclude 'png,jpg,gif,jpeg,swf,woff,svg,pdf,json,css,js,webp' --quiet -o "output/$sub.yaml"
+        done
+    fi
+    
+    # Langkah 3: Menjalankan Nuclei pada hasil ParamSpider
+    echo "Menjalankan Nuclei pada hasil ParamSpider..."
+    if [ "$parallel_mode" = true ]; then
+        cat "output/$subdomain_subdomains.txt" | xargs -n 1 -P 10 -I {} bash -c "httpx -silent -mc 200,301,302,403 -l {} | nuclei -t '$home_dir/nuclei-templates' -dast -rl 05"
+    else
+        cat "output/$subdomain_subdomains.txt" | while IFS= read -r sub; do
+            httpx -silent -mc 200,301,302,403 -l "$sub" | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05
+        done
     fi
 
-    echo -e "${GREEN}[+] Menggunakan ParamSpider untuk mengumpulkan parameter dari subdomain...${RESET}"
-    param_output="output/${scan_domain}_params.yaml"
-    while IFS= read -r subdomain; do
-        python3 "$home_dir/ParamSpider/paramspider.py" -d "$subdomain" --exclude "$excluded_extentions" --level high --quiet -o "output/${subdomain}_params.yaml"
-        cat "output/${subdomain}_params.yaml" >> "$param_output"
-    done < "$subdomains_output"
-
-    if [ ! -s "$param_output" ]; then
-        echo -e "${RED}[-] Tidak ada parameter ditemukan untuk subdomain dari $scan_domain. Keluar...${RESET}"
-        exit 1
-    fi
-
-    echo -e "${GREEN}[+] Menggunakan Nuclei untuk memindai parameter yang ditemukan...${RESET}"
-    temp_file=$(mktemp)
-    sort "$param_output" > "$temp_file"
-    httpx -silent -mc 200,301,302,403 -l "$temp_file" | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05
-    rm "$temp_file"  # Hapus file sementara
-
-    echo -e "${GREEN}[+] Pemindaian selesai untuk domain $scan_domain! Selamat Fuzzing.${RESET}"
-    exit 0
-fi
-
-# Jika tidak ada opsi yang dikenali, tampilkan bantuan
-if [ -z "$domain" ] && [ -z "$filename" ]; then
-    echo "Harap berikan domain dengan opsi -d, file dengan opsi -f, atau gunakan -S untuk pipeline otomatis."
+# Menampilkan pesan jika tidak ada opsi yang diberikan
+else
+    echo "Silakan pilih salah satu opsi: -d untuk domain, -f untuk file, atau -s untuk subdomain"
     display_help
 fi
+
+# Menyelesaikan pemindaian
+echo "Pemindaian selesai - Selamat Fuzzing!"
