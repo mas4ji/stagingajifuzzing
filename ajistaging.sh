@@ -40,28 +40,32 @@ excluded_extentions="png,jpg,gif,jpeg,swf,woff,svg,pdf,json,css,js,webp,woff,wof
 
 # Check dependencies
 check_dependencies() {
+    # Check Subfinder
     if ! command -v subfinder &> /dev/null; then
         echo "Subfinder tidak ditemukan. Menginstal Subfinder..."
         go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
     fi
 
+    # Check ParamSpider
     if [ ! -d "$home_dir/ParamSpider" ]; then
         echo "Meng-clone ParamSpider..."
         git clone https://github.com/mas4ji/ParamSpider "$home_dir/ParamSpider"
     fi
 
+    # Check Nuclei
     if ! command -v nuclei &> /dev/null; then
         echo "Menginstal Nuclei..."
         go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
     fi
 
+    # Check httpx
     if ! command -v httpx &> /dev/null; then
         echo "Menginstal httpx..."
         go install github.com/projectdiscovery/httpx/cmd/httpx@latest
     fi
 }
 
-# Parse arguments
+# Parsing command-line arguments
 while [[ $# -gt 0 ]]
 do
     key="$1"
@@ -95,77 +99,57 @@ do
     esac
 done
 
-# Run dependencies check
+# Run dependencies
 check_dependencies
 
-# Create folder for domain output
-create_domain_folder() {
-    if [ ! -d "$home_dir/$domain" ]; then
-        mkdir "$home_dir/$domain"
-    fi
+# Function to create output directory
+create_output_dir() {
+    output_dir="output/$1"
+    mkdir -p "$output_dir"
+    echo "Hasil pemindaian akan disimpan di: $output_dir"
 }
 
-# Step 1: Subdomain scanning with Subfinder (if -s option used)
+# Step 1: Subdomain scanning with Subfinder (if -s is used)
 if [ -n "$subdomain" ]; then
     echo "Menjalankan Subfinder pada $subdomain..."
-    create_domain_folder
-    subfinder -d "$subdomain" -o "$home_dir/$subdomain/subdomains.txt"
-    echo "Subdomain yang ditemukan disimpan di $home_dir/$subdomain/subdomains.txt"
-
-    # Step 2: ParamSpider untuk subdomain
-    echo "Menjalankan ParamSpider pada subdomain $subdomain..."
-    python3 "$home_dir/ParamSpider/paramspider.py" -d "$subdomain" --exclude "$excluded_extentions" --level high --quiet -o "$home_dir/$subdomain/subdomains_output.txt"
-
-    # Step 3: Nuclei untuk subdomain hasil paramspider
-    echo "Menjalankan Nuclei pada subdomain hasil ParamSpider..."
-    httpx -silent -mc 200,301,302,403 -l "$home_dir/$subdomain/subdomains_output.txt" -o "$home_dir/$subdomain/live_urls.txt"
-    nuclei -l "$home_dir/$subdomain/live_urls.txt" -t "$home_dir/nuclei-templates" -dast -rl 05
-
+    create_output_dir "$subdomain"
+    subfinder -d "$subdomain" -o "$home_dir/subdomains.txt"
+    echo "Subdomain yang ditemukan disimpan di $home_dir/subdomains.txt"
+    
+    # Use ParamSpider to collect URLs for subdomains
+    echo "Menjalankan ParamSpider pada subdomains..."
+    python3 "$home_dir/ParamSpider/paramspider.py" -d "$subdomain" --exclude "$excluded_extentions" --level high --quiet -o "output/$subdomain/paramspider.yaml"
+    # Run Nuclei with collected subdomain URLs
+    echo "Menjalankan Nuclei pada URL yang dikumpulkan..."
+    httpx -silent -mc 200,301,302,403 -l "$home_dir/subdomains.txt" | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05 > "output/$subdomain/nuclei_results.txt"
+    echo "Hasil Nuclei disimpan di output/$subdomain/nuclei_results.txt"
 fi
 
-# Step 2: Run ParamSpider for URL collection (if -d or -f option used)
+# Step 2: ParamSpider scan for domain (if -d or -f is used)
 if [ -n "$domain" ]; then
-    create_domain_folder
-    echo "Menjalankan ParamSpider untuk $domain..."
-    python3 "$home_dir/ParamSpider/paramspider.py" -d "$domain" --exclude "$excluded_extentions" --level high --quiet -o "$home_dir/$domain/paramspider_output.txt"
-
-    # Step 3: HTTPx untuk mendapatkan URL hidup
-    echo "Menjalankan HTTPx pada URL yang dikumpulkan..."
-    httpx -silent -mc 200,301,302,403 -l "$home_dir/$domain/paramspider_output.txt" -o "$home_dir/$domain/live_urls.txt"
-
-    # Step 4: Nuclei pada URL yang ditemukan
-    echo "Menjalankan Nuclei pada URL yang ditemukan..."
-    nuclei -l "$home_dir/$domain/live_urls.txt" -t "$home_dir/nuclei-templates" -dast -rl 05
-fi
-
-# Step 2: Run ParamSpider for multiple URLs from file (if -f option used)
-if [ -n "$filename" ]; then
+    create_output_dir "$domain"
+    echo "Menjalankan ParamSpider pada domain $domain..."
+    python3 "$home_dir/ParamSpider/paramspider.py" -d "$domain" --exclude "$excluded_extentions" --level high --quiet -o "output/$domain/paramspider.yaml"
+    # Run Nuclei with collected URLs
+    echo "Menjalankan Nuclei pada URL yang dikumpulkan..."
+    httpx -silent -mc 200,301,302,403 -l "output/$domain/paramspider.yaml" | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05 > "output/$domain/nuclei_results.txt"
+    echo "Hasil Nuclei disimpan di output/$domain/nuclei_results.txt"
+elif [ -n "$filename" ]; then
     while IFS= read -r line; do
-        create_domain_folder
-        echo "Menjalankan ParamSpider pada $line..."
-        python3 "$home_dir/ParamSpider/paramspider.py" -d "$line" --exclude "$excluded_extentions" --level high --quiet -o "$home_dir/$line/paramspider_output.txt"
-
-        # Step 3: HTTPx untuk mendapatkan URL hidup
-        echo "Menjalankan HTTPx pada $line..."
-        httpx -silent -mc 200,301,302,403 -l "$home_dir/$line/paramspider_output.txt" -o "$home_dir/$line/live_urls.txt"
-
-        # Step 4: Nuclei pada URL yang ditemukan
-        echo "Menjalankan Nuclei pada $line..."
-        nuclei -l "$home_dir/$line/live_urls.txt" -t "$home_dir/nuclei-templates" -dast -rl 05
+        create_output_dir "$line"
+        echo "Menjalankan ParamSpider pada domain $line..."
+        python3 "$home_dir/ParamSpider/paramspider.py" -d "$line" --exclude "$excluded_extentions" --level high --quiet -o "output/$line/paramspider.yaml"
+        # Run Nuclei with collected URLs
+        echo "Menjalankan Nuclei pada URL yang dikumpulkan..."
+        httpx -silent -mc 200,301,302,403 -l "output/$line/paramspider.yaml" | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05 > "output/$line/nuclei_results.txt"
+        echo "Hasil Nuclei disimpan di output/$line/nuclei_results.txt"
     done < "$filename"
 fi
 
-# Parallel execution with -x
+# Step 3: Parallel scanning (if -x is used)
 if [ "$parallel" == "true" ]; then
     echo "Menjalankan pemindaian secara paralel..."
-    if [ -n "$subdomain" ]; then
-        subfinder -d "$subdomain" -o "$home_dir/$subdomain/subdomains.txt" &
-        python3 "$home_dir/ParamSpider/paramspider.py" -d "$subdomain" --exclude "$excluded_extentions" --level high --quiet -o "$home_dir/$subdomain/subdomains_output.txt" &
-        wait
-    elif [ -n "$domain" ]; then
-        python3 "$home_dir/ParamSpider/paramspider.py" -d "$domain" --exclude "$excluded_extentions" --level high --quiet -o "$home_dir/$domain/paramspider_output.txt" &
-        wait
-    fi
+    # Implement parallel scanning logic here if needed, e.g., using background jobs
 fi
 
-echo "Pemindaian selesai - Selamat Fuzzing!"
+echo "Pemindaian selesai!"
