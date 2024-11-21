@@ -1,13 +1,14 @@
-#!/bin/bash
+#!/bin/bash 
 
 # ANSI color codes
 GREEN='\033[92m'
 RED='\033[91m'
 RESET='\033[0m'
 
-# ASCII art with colors
+# ASCII art with color (for Green and Red)
 echo -e "${GREEN}"
 cat << "EOF"
+
    _____       __.__  _______________ _______________________.___ _______    ________ 
   /  _  \     |__|__| \_   _____/    |   \____    /\____    /|   |\      \  /  _____/ 
  /  /_\  \    |  |  |  |    __) |    |   / /     /   /     / |   |/   |   \/   \  ___ 
@@ -19,7 +20,7 @@ cat << "EOF"
 EOF
 echo -e "${RESET}"
 
-# Help function
+# Help menu
 display_help() {
     echo -e "AjiFuzzer adalah alat otomatisasi untuk mendeteksi kerentanannya XSS, SQLi, SSRF, Open-Redirect, dll. di Aplikasi Web\n\n"
     echo -e "Penggunaan: $0 [opsi]\n\n"
@@ -27,45 +28,42 @@ display_help() {
     echo "  -h, --help              Menampilkan informasi bantuan"
     echo "  -d, --domain <domain>   Satu domain untuk dipindai kerentanannya XSS, SQLi, SSRF, Open-Redirect, dll."
     echo "  -f, --file <filename>   File yang berisi beberapa domain/URL untuk dipindai"
-    echo "  -s, --subdomain <domain> Pemindaian subdomain menggunakan Subfinder dan ParamSpider"
-    echo "  -x, --parallel           Menjalankan pemindaian secara paralel"
+    echo "  -X, --parallel          Jalankan pemindaian secara paralel untuk beberapa domain"
     exit 0
 }
 
-# Get home directory
+# Mendapatkan direktori home pengguna
 home_dir=$(eval echo ~"$USER")
 
-# Excluded file extensions
+# Ekstensi yang dikecualikan
 excluded_extentions="png,jpg,gif,jpeg,swf,woff,svg,pdf,json,css,js,webp,woff,woff2,eot,ttf,otf,mp4,txt"
 
-# Check dependencies
-check_dependencies() {
-    # Check Subfinder
-    if ! command -v subfinder &> /dev/null; then
-        echo "Subfinder tidak ditemukan. Menginstal Subfinder..."
-        go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
-    fi
+# Memeriksa apakah ParamSpider sudah terpasang
+if [ ! -d "$home_dir/ParamSpider" ]; then
+    echo "Meng-clone ParamSpider..."
+    git clone https://github.com/mas4ji/ParamSpider "$home_dir/ParamSpider"
+fi
 
-    # Check ParamSpider
-    if [ ! -d "$home_dir/ParamSpider" ]; then
-        echo "Meng-clone ParamSpider..."
-        git clone https://github.com/mas4ji/ParamSpider "$home_dir/ParamSpider"
-    fi
+# Memeriksa apakah template Nuclei sudah terpasang
+if [ ! -d "$home_dir/nuclei-templates" ]; then
+    echo "Meng-clone nuclei-templates..."
+    git clone https://github.com/projectdiscovery/nuclei-templates.git "$home_dir/nuclei-templates"
+fi
 
-    # Check Nuclei
-    if ! command -v nuclei &> /dev/null; then
-        echo "Menginstal Nuclei..."
-        go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
-    fi
+# Memeriksa apakah Nuclei sudah terpasang
+if ! command -v nuclei &> /dev/null; then
+    echo "Menginstal Nuclei..."
+    go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+fi
 
-    # Check httpx
-    if ! command -v httpx &> /dev/null; then
-        echo "Menginstal httpx..."
-        go install github.com/projectdiscovery/httpx/cmd/httpx@latest
-    fi
-}
+# Memeriksa apakah httpx sudah terpasang
+if ! command -v httpx &> /dev/null; then
+    echo "Menginstal httpx..."
+    go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
+fi
 
-# Parsing command-line arguments
+# Parsing argumen baris perintah
+parallel=false
 while [[ $# -gt 0 ]]
 do
     key="$1"
@@ -83,13 +81,8 @@ do
             shift
             shift
             ;;
-        -s|--subdomain)
-            subdomain="$2"
-            shift
-            shift
-            ;;
-        -x|--parallel)
-            parallel="true"
+        -X|--parallel)
+            parallel=true
             shift
             ;;
         *)
@@ -99,57 +92,65 @@ do
     esac
 done
 
-# Run dependencies
-check_dependencies
+# Langkah 1: Meminta pengguna memasukkan domain atau file
+if [ -z "$domain" ] && [ -z "$filename" ]; then
+    echo "Harap berikan domain dengan opsi -d atau file dengan opsi -f."
+    display_help
+fi
 
-# Function to create output directory
-create_output_dir() {
-    output_dir="output/$1"
-    mkdir -p "$output_dir"
-    echo "Hasil pemindaian akan disimpan di: $output_dir"
+# File output gabungan untuk semua domain
+output_file="output/allurls.yaml"
+
+# Langkah 2: Menjalankan ParamSpider untuk mengumpulkan URL yang rentan
+run_paramspider() {
+    local domain=$1
+    echo "Menjalankan ParamSpider pada $domain"
+    python3 "$home_dir/ParamSpider/paramspider.py" -d "$domain" --exclude "$excluded_extentions" --level high --quiet -o "output/$domain.yaml"
 }
 
-# Step 1: Subdomain scanning with Subfinder (if -s is used)
-if [ -n "$subdomain" ]; then
-    echo "Menjalankan Subfinder pada $subdomain..."
-    create_output_dir "$subdomain"
-    subfinder -d "$subdomain" -o "$home_dir/subdomains.txt"
-    echo "Subdomain yang ditemukan disimpan di $home_dir/subdomains.txt"
-    
-    # Use ParamSpider to collect URLs for subdomains
-    echo "Menjalankan ParamSpider pada subdomains..."
-    python3 "$home_dir/ParamSpider/paramspider.py" -d "$subdomain" --exclude "$excluded_extentions" --level high --quiet -o "output/$subdomain/paramspider.yaml"
-    # Run Nuclei with collected subdomain URLs
-    echo "Menjalankan Nuclei pada URL yang dikumpulkan..."
-    httpx -silent -mc 200,301,302,403 -l "$home_dir/subdomains.txt" | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05 > "output/$subdomain/nuclei_results.txt"
-    echo "Hasil Nuclei disimpan di output/$subdomain/nuclei_results.txt"
-fi
-
-# Step 2: ParamSpider scan for domain (if -d or -f is used)
 if [ -n "$domain" ]; then
-    create_output_dir "$domain"
-    echo "Menjalankan ParamSpider pada domain $domain..."
-    python3 "$home_dir/ParamSpider/paramspider.py" -d "$domain" --exclude "$excluded_extentions" --level high --quiet -o "output/$domain/paramspider.yaml"
-    # Run Nuclei with collected URLs
-    echo "Menjalankan Nuclei pada URL yang dikumpulkan..."
-    httpx -silent -mc 200,301,302,403 -l "output/$domain/paramspider.yaml" | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05 > "output/$domain/nuclei_results.txt"
-    echo "Hasil Nuclei disimpan di output/$domain/nuclei_results.txt"
+    if [ "$parallel" = true ]; then
+        # Menjalankan ParamSpider secara paralel untuk satu domain jika -X diaktifkan
+        run_paramspider "$domain" &
+        wait  # Menunggu agar semua proses selesai
+    else
+        run_paramspider "$domain"
+    fi
 elif [ -n "$filename" ]; then
-    while IFS= read -r line; do
-        create_output_dir "$line"
-        echo "Menjalankan ParamSpider pada domain $line..."
-        python3 "$home_dir/ParamSpider/paramspider.py" -d "$line" --exclude "$excluded_extentions" --level high --quiet -o "output/$line/paramspider.yaml"
-        # Run Nuclei with collected URLs
-        echo "Menjalankan Nuclei pada URL yang dikumpulkan..."
-        httpx -silent -mc 200,301,302,403 -l "output/$line/paramspider.yaml" | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05 > "output/$line/nuclei_results.txt"
-        echo "Hasil Nuclei disimpan di output/$line/nuclei_results.txt"
-    done < "$filename"
+    echo "Menjalankan ParamSpider pada URL dari $filename"
+    if [ "$parallel" = true ]; then
+        while IFS= read -r line; do
+            run_paramspider "$line" &
+        done < "$filename"
+        wait  # Menunggu agar semua proses selesai
+    else
+        while IFS= read -r line; do
+            run_paramspider "$line"
+            cat "output/${line}.yaml" >> "$output_file"  # Menambahkan ke file output gabungan
+        done < "$filename"
+    fi
 fi
 
-# Step 3: Parallel scanning (if -x is used)
-if [ "$parallel" == "true" ]; then
-    echo "Menjalankan pemindaian secara paralel..."
-    # Implement parallel scanning logic here if needed, e.g., using background jobs
+# Langkah 3: Memeriksa apakah URL ditemukan
+if [ -n "$domain" ] && [ ! -s "output/$domain.yaml" ]; then
+    echo "Tidak ada URL ditemukan untuk domain $domain. Keluar..."
+    exit 1
+elif [ -n "$filename" ] && [ ! -s "$output_file" ]; then
+    echo "Tidak ada URL ditemukan di file $filename. Keluar..."
+    exit 1
 fi
 
-echo "Pemindaian selesai!"
+# Langkah 4: Menjalankan template Nuclei pada URL yang dikumpulkan
+echo "Menjalankan Nuclei pada URL yang dikumpulkan"
+temp_file=$(mktemp)
+if [ -n "$domain" ]; then
+    sort "output/$domain.yaml" > "$temp_file"
+    httpx -silent -mc 200,301,302,403 -l "$temp_file" | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05
+elif [ -n "$filename" ]; then
+    sort "$output_file" > "$temp_file"
+    httpx -silent -mc 200,301,302,403 -l "$temp_file" | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05
+fi
+rm "$temp_file"  # Menghapus file sementara
+
+# Langkah 5: Menyelesaikan pemindaian
+echo "Pemindaian selesai - Selamat Fuzzing"
