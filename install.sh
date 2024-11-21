@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Pastikan file skrip utama (misalnya AjiFuzzer.sh) ada
-if [ ! -f "AjiFuzzer.sh" ]; then
+if [ ! -f "ajifuzzer.sh" ]; then
     echo "File AjiFuzzer.sh tidak ditemukan. Pastikan file ini ada di direktori yang sama dengan skrip install.sh"
     exit 1
 fi
