@@ -23,16 +23,16 @@ else
     echo "Go sudah terpasang."
 fi
 
-# Menghapus file lama jika ada di /usr/bin/staging
-if [ -f "$BIN_DIR/staging" ]; then
-    echo "Menghapus file lama staging di $BIN_DIR/staging..."
-    sudo rm "$BIN_DIR/staging"
-fi
-
 # Memeriksa apakah file staging.sh ada di direktori saat ini
 if [ ! -f "staging.sh" ]; then
     echo "File staging.sh tidak ditemukan. Pastikan file ini ada di direktori yang sama dengan skrip install.sh"
     exit 1
+fi
+
+# Menghapus file lama jika ada di /usr/bin/staging
+if [ -f "$BIN_DIR/staging" ]; then
+    echo "Menghapus file lama staging di $BIN_DIR/staging..."
+    sudo rm "$BIN_DIR/staging"
 fi
 
 # Menyalin staging.sh ke /usr/bin/staging (untuk akses global)
