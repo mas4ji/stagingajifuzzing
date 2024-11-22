@@ -2,7 +2,7 @@
 
 # Menentukan direktori instalasi di dalam HOME pengguna
 HOME_DIR="$HOME"
-BIN_DIR="/usr/bin"  # Menggunakan /usr/bin untuk menyalin file eksekusi secara global
+BIN_DIR="/usr/local/bin"  # Menggunakan /usr/local/bin untuk menyalin file eksekusi secara global
 
 # Memeriksa apakah Go sudah terpasang
 if ! command -v go &> /dev/null; then
@@ -23,19 +23,19 @@ else
     echo "Go sudah terpasang."
 fi
 
+# Menghapus file lama jika ada di /usr/local/bin/staging
+if [ -f "$BIN_DIR/staging" ]; then
+    echo "Menghapus file lama staging di $BIN_DIR/staging..."
+    sudo rm "$BIN_DIR/staging"
+fi
+
 # Memeriksa apakah file staging.sh ada di direktori saat ini
 if [ ! -f "staging.sh" ]; then
     echo "File staging.sh tidak ditemukan. Pastikan file ini ada di direktori yang sama dengan skrip install.sh"
     exit 1
 fi
 
-# Menghapus file lama jika ada di /usr/bin/staging
-if [ -f "$BIN_DIR/staging" ]; then
-    echo "Menghapus file lama staging di $BIN_DIR/staging..."
-    sudo rm "$BIN_DIR/staging"
-fi
-
-# Menyalin staging.sh ke /usr/bin/staging (untuk akses global)
+# Menyalin staging.sh ke /usr/local/bin/staging (untuk akses global)
 echo "Menyalin staging.sh ke $BIN_DIR/staging..."
 sudo cp staging.sh "$BIN_DIR/staging"
 
@@ -43,11 +43,17 @@ sudo cp staging.sh "$BIN_DIR/staging"
 echo "Memberikan izin eksekusi pada $BIN_DIR/staging..."
 sudo chmod +x "$BIN_DIR/staging"
 
-# Memastikan bin berada dalam PATH
+# Memastikan /usr/local/bin berada dalam PATH
 if ! echo "$PATH" | grep -q "$BIN_DIR"; then
     echo "Menambahkan $BIN_DIR ke PATH..."
     echo "export PATH=\$PATH:$BIN_DIR" >> "$HOME/.bashrc"
     source "$HOME/.bashrc"
+fi
+
+# Memastikan bahwa executable bisa dijalankan langsung
+if ! command -v staging &> /dev/null; then
+    echo "File 'staging' tidak dapat ditemukan dalam PATH. Coba untuk memulai ulang terminal Anda."
+    exit 1
 fi
 
 # Memeriksa apakah ParamSpider sudah terpasang
