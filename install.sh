@@ -2,7 +2,7 @@
 
 # Menentukan direktori instalasi di dalam HOME pengguna
 HOME_DIR="$HOME"
-BIN_DIR="$HOME_DIR/bin"
+BIN_DIR="/usr/local/bin"  # Ubah ini ke /usr/local/bin untuk akses global
 
 # Memeriksa apakah Go sudah terpasang
 if ! command -v go &> /dev/null; then
@@ -29,18 +29,17 @@ if [ ! -f "staging.sh" ]; then
     exit 1
 fi
 
-# Menyalin staging.sh ke direktori bin
+# Menyalin staging.sh ke /usr/local/bin (agar bisa diakses di seluruh sistem)
 echo "Menyalin staging.sh ke $BIN_DIR/staging..."
-mkdir -p "$BIN_DIR"
-cp staging.sh "$BIN_DIR/staging"
+sudo cp staging.sh "$BIN_DIR/staging"
 
 # Memberikan izin eksekusi pada staging
 echo "Memberikan izin eksekusi pada $BIN_DIR/staging..."
-chmod +x "$BIN_DIR/staging"
+sudo chmod +x "$BIN_DIR/staging"
 
 # Memastikan bin berada dalam PATH
-if ! grep -q "$BIN_DIR" "$HOME_DIR/.bashrc"; then
-    echo "Menambahkan $BIN_DIR ke PATH dalam $HOME_DIR/.bashrc..."
+if ! echo "$PATH" | grep -q "$BIN_DIR"; then
+    echo "Menambahkan $BIN_DIR ke PATH..."
     echo "export PATH=\$PATH:$BIN_DIR" >> "$HOME_DIR/.bashrc"
     source "$HOME_DIR/.bashrc"
 fi
