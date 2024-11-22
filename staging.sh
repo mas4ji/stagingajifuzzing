@@ -28,8 +28,7 @@ display_help() {
     echo "  -h, --help              Menampilkan informasi bantuan"
     echo "  -d, --domain <domain>   Satu domain untuk dipindai kerentanannya XSS, SQLi, SSRF, Open-Redirect, dll."
     echo "  -f, --file <filename>   File yang berisi beberapa domain/URL untuk dipindai"
-    echo "  -x, --parallel          Mengaktifkan paralelisasi hanya untuk ParamSpider"
-    echo "  -o, --automated         Menjalankan alur otomatis: subfinder -> paramspider -> nuclei"
+    echo "  -u, --proxy <proxy>     Menambahkan proxy untuk alat (contoh: http://127.0.0.1:8080)"
     exit 0
 }
 
@@ -63,12 +62,6 @@ if ! command -v httpx &> /dev/null; then
     go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
 fi
 
-# Memeriksa apakah subfinder sudah terpasang
-if ! command -v subfinder &> /dev/null; then
-    echo "Menginstal subfinder..."
-    go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
-fi
-
 # Parsing argumen baris perintah
 while [[ $# -gt 0 ]]
 do
@@ -87,12 +80,9 @@ do
             shift
             shift
             ;;
-        -x|--parallel)
-            parallel_mode=true
+        -u|--proxy)
+            proxy="$2"
             shift
-            ;;
-        -o|--automated)
-            automated_mode=true
             shift
             ;;
         *)
@@ -102,73 +92,69 @@ do
     esac
 done
 
+# Jika proxy tidak disediakan, setel ke kosong
+if [ -z "$proxy" ]; then
+    proxy=""
+fi
+
 # Langkah 1: Meminta pengguna memasukkan domain atau file
-if [ -z "$domain" ] && [ -z "$filename" ] && [ -z "$automated_mode" ]; then
+if [ -z "$domain" ] && [ -z "$filename" ]; then
     echo "Harap berikan domain dengan opsi -d atau file dengan opsi -f."
     display_help
 fi
 
-# Memastikan direktori output ada
-mkdir -p output
+# File output gabungan untuk semua domain
+output_file="output/allurls.yaml"
 
-# Langkah 2: Menjalankan alur otomatis jika -o digunakan
-if [ "$automated_mode" = true ]; then
-    if [ -z "$domain" ]; then
-        echo "Harap berikan domain dengan opsi -d untuk mode otomatis."
-        exit 1
+# Langkah 2: Menjalankan ParamSpider untuk mengumpulkan URL yang rentan
+if [ -n "$domain" ]; then
+    echo "Menjalankan ParamSpider pada $domain"
+    if [ -n "$proxy" ]; then
+        python3 "$home_dir/ParamSpider/paramspider.py" -d "$domain" --exclude "$excluded_extentions" --level high --quiet -o "output/$domain.yaml" --proxy "$proxy"
+    else
+        python3 "$home_dir/ParamSpider/paramspider.py" -d "$domain" --exclude "$excluded_extentions" --level high --quiet -o "output/$domain.yaml"
     fi
-    echo "Menjalankan Subfinder untuk mencari subdomain dari $domain..."
-    subfinder -d "$domain" -o "output/$domain_subdomains.txt"
-
-    echo "Menjalankan ParamSpider untuk mencari parameter dari subdomain yang ditemukan..."
-    # Membatasi jumlah paralel menjadi 10 untuk mengurangi risiko overloading server Wayback Machine
-    cat "output/$domain_subdomains.txt" | parallel -j 10 python3 "$home_dir/ParamSpider/paramspider.py" -d {} --exclude "$excluded_extentions" --level high --quiet -o "output/{}.yaml"
-
-    # Gabungkan hasil ParamSpider ke file output gabungan
-    cat "output/$domain_subdomains.txt" | while IFS= read -r line; do
-        cat "output/${line}.yaml" >> "output/allurls.yaml"
-    done
-
-    echo "Menjalankan Nuclei pada URL yang dikumpulkan..."
-    temp_file=$(mktemp)
-    sort "output/allurls.yaml" > "$temp_file"
-    httpx -silent -mc 200,301,302,403 -l "$temp_file" | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05
-    rm "$temp_file"
-fi
-
-# Langkah 3: Menjalankan ParamSpider untuk mengumpulkan URL yang rentan jika -d atau -f dipilih tanpa -o
-if [ -n "$domain" ] && [ -z "$automated_mode" ]; then
-    echo "Menjalankan ParamSpider pada domain $domain"
-    python3 "$home_dir/ParamSpider/paramspider.py" -d "$domain" --exclude "$excluded_extentions" --level high --quiet -o "output/$domain.yaml"
-elif [ -n "$filename" ] && [ -z "$automated_mode" ]; then
+elif [ -n "$filename" ]; then
     echo "Menjalankan ParamSpider pada URL dari $filename"
     while IFS= read -r line; do
-        python3 "$home_dir/ParamSpider/paramspider.py" -d "$line" --exclude "$excluded_extentions" --level high --quiet -o "output/${line}.yaml"
-        cat "output/${line}.yaml" >> "output/allurls.yaml"  # Menambahkan ke file output gabungan
+        if [ -n "$proxy" ]; then
+            python3 "$home_dir/ParamSpider/paramspider.py" -d "$line" --exclude "$excluded_extentions" --level high --quiet -o "output/${line}.yaml" --proxy "$proxy"
+        else
+            python3 "$home_dir/ParamSpider/paramspider.py" -d "$line" --exclude "$excluded_extentions" --level high --quiet -o "output/${line}.yaml"
+        fi
+        cat "output/${line}.yaml" >> "$output_file"  # Menambahkan ke file output gabungan
     done < "$filename"
 fi
 
-# Langkah 4: Memeriksa apakah URL ditemukan
+# Langkah 3: Memeriksa apakah URL ditemukan
 if [ -n "$domain" ] && [ ! -s "output/$domain.yaml" ]; then
     echo "Tidak ada URL ditemukan untuk domain $domain. Keluar..."
     exit 1
-elif [ -n "$filename" ] && [ ! -s "output/allurls.yaml" ]; then
+elif [ -n "$filename" ] && [ ! -s "$output_file" ]; then
     echo "Tidak ada URL ditemukan di file $filename. Keluar..."
     exit 1
 fi
 
-# Langkah 5: Menjalankan template Nuclei pada URL yang dikumpulkan
+# Langkah 4: Menjalankan template Nuclei pada URL yang dikumpulkan
 echo "Menjalankan Nuclei pada URL yang dikumpulkan"
 temp_file=$(mktemp)
 if [ -n "$domain" ]; then
     # Menggunakan file sementara untuk menyimpan URL yang sudah diurutkan dan unik
     sort "output/$domain.yaml" > "$temp_file"
-    httpx -silent -mc 200,301,302,403 -l "$temp_file" | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05
+    if [ -n "$proxy" ]; then
+        httpx -silent -mc 200,301,302,403 -l "$temp_file" -proxy "$proxy" | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05 -proxy "$proxy"
+    else
+        httpx -silent -mc 200,301,302,403 -l "$temp_file" | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05
+    fi
 elif [ -n "$filename" ]; then
-    sort "output/allurls.yaml" > "$temp_file"
-    httpx -silent -mc 200,301,302,403 -l "$temp_file" | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05
+    sort "$output_file" > "$temp_file"
+    if [ -n "$proxy" ]; then
+        httpx -silent -mc 200,301,302,403 -l "$temp_file" -proxy "$proxy" | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05 -proxy "$proxy"
+    else
+        httpx -silent -mc 200,301,302,403 -l "$temp_file" | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05
+    fi
 fi
 rm "$temp_file"  # Menghapus file sementara
 
-# Langkah 6: Menyelesaikan pemindaian
+# Langkah 5: Menyelesaikan pemindaian
 echo "Pemindaian selesai - Selamat Fuzzing"
