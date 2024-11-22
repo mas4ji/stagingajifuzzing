@@ -37,7 +37,7 @@ sudo cp staging.sh "$BIN_DIR/staging"
 echo "Memberikan izin eksekusi pada $BIN_DIR/staging..."
 sudo chmod +x "$BIN_DIR/staging"
 
-# Memastikan /usr/bin ada dalam PATH
+# Memastikan bin berada dalam PATH
 if ! echo "$PATH" | grep -q "$BIN_DIR"; then
     echo "Menambahkan $BIN_DIR ke PATH..."
     echo "export PATH=\$PATH:$BIN_DIR" >> "$HOME_DIR/.bashrc"
