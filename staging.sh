@@ -28,6 +28,7 @@ display_help() {
     echo "  -h, --help              Menampilkan informasi bantuan"
     echo "  -d, --domain <domain>   Satu domain untuk dipindai kerentanannya XSS, SQLi, SSRF, Open-Redirect, dll."
     echo "  -f, --file <filename>   File yang berisi beberapa domain/URL untuk dipindai"
+    echo "  -x                       Mengaktifkan penggunaan GNU Parallel"
     exit 0
 }
 
@@ -35,7 +36,7 @@ display_help() {
 home_dir=$(eval echo ~"$USER")
 
 # Ekstensi yang dikecualikan
-excluded_extentions="png,jpg,gif,jpeg,swf,woff,svg,pdf,json,css,js,webp,woff,woff2,eot,ttf,otf,mp4,txt"
+excluded_extentions="png,jpg,gif,jpeg,swf,woff,svg,pdf,json,css,js,webp,woff2,eot,ttf,otf,mp4,txt"
 
 # Memeriksa apakah ParamSpider sudah terpasang
 if [ ! -d "$home_dir/ParamSpider" ]; then
@@ -61,14 +62,14 @@ if ! command -v httpx &> /dev/null; then
     go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
 fi
 
-# Memeriksa apakah parallel sudah terpasang (optional, untuk kontrol paralel lebih lanjut)
-if ! command -v parallel &> /dev/null; then
+# Memeriksa apakah parallel harus diinstal berdasarkan flag -x
+if [[ "$1" == "-x" ]] && ! command -v parallel &> /dev/null; then
     echo "Menginstal GNU Parallel..."
     sudo apt install parallel
 fi
 
 # Parsing argumen baris perintah
-while [[ $# -gt 0 ]]
+while [[ $# -gt 0 ]];
 do
     key="$1"
     case $key in
@@ -83,6 +84,10 @@ do
         -f|--file)
             filename="$2"
             shift
+            shift
+            ;;
+        -x)
+            enable_parallel=true
             shift
             ;;
         * )
@@ -125,11 +130,22 @@ fi
 # Langkah 4: Menjalankan template Nuclei pada URL yang dikumpulkan
 echo "Menjalankan Nuclei pada URL yang dikumpulkan"
 temp_file=$(mktemp)
-if [ -n "$domain" ]; then
-    # Menyaring dan mengurutkan URL yang ditemukan, kemudian menjalankan httpx dan Nuclei secara paralel
-    sort "output/$domain.yaml" | httpx -silent -mc 200,301,302,403 | parallel -j 10 nuclei -t "$home_dir/nuclei-templates" -dast -rl 05
-elif [ -n "$filename" ]; then
-    sort "$output_file" | httpx -silent -mc 200,301,302,403 | parallel -j 10 nuclei -t "$home_dir/nuclei-templates" -dast -rl 05
+
+# Mengecek apakah parallel diaktifkan
+if [ "$enable_parallel" = true ]; then
+    echo "Menjalankan httpx dan nuclei dengan paralel..."
+    if [ -n "$domain" ]; then
+        sort "output/$domain.yaml" | httpx -silent -mc 200,301,302,403 | parallel -j 10 nuclei -t "$home_dir/nuclei-templates" -dast -rl 05
+    elif [ -n "$filename" ]; then
+        sort "$output_file" | httpx -silent -mc 200,301,302,403 | parallel -j 10 nuclei -t "$home_dir/nuclei-templates" -dast -rl 05
+    fi
+else
+    echo "Menjalankan httpx dan nuclei tanpa paralel..."
+    if [ -n "$domain" ]; then
+        sort "output/$domain.yaml" | httpx -silent -mc 200,301,302,403 | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05
+    elif [ -n "$filename" ]; then
+        sort "$output_file" | httpx -silent -mc 200,301,302,403 | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05
+    fi
 fi
 
 # Langkah 5: Menyelesaikan pemindaian
