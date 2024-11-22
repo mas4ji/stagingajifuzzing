@@ -121,7 +121,8 @@ if [ "$automated_mode" = true ]; then
     subfinder -d "$domain" -o "output/$domain_subdomains.txt"
 
     echo "Menjalankan ParamSpider untuk mencari parameter dari subdomain yang ditemukan..."
-    cat "output/$domain_subdomains.txt" | parallel -j 4 python3 "$home_dir/ParamSpider/paramspider.py" -d {} --exclude "$excluded_extentions" --level high --quiet -o "output/{}.yaml"
+    # Membatasi jumlah paralel menjadi 10 untuk mengurangi risiko overloading server Wayback Machine
+    cat "output/$domain_subdomains.txt" | parallel -j 10 python3 "$home_dir/ParamSpider/paramspider.py" -d {} --exclude "$excluded_extentions" --level high --quiet -o "output/{}.yaml"
 
     # Gabungkan hasil ParamSpider ke file output gabungan
     cat "output/$domain_subdomains.txt" | while IFS= read -r line; do
