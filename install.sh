@@ -2,7 +2,7 @@
 
 # Menentukan direktori instalasi di dalam HOME pengguna
 HOME_DIR="$HOME"
-BIN_DIR="/usr/local/bin"  # Ubah ini ke /usr/local/bin untuk akses global
+BIN_DIR="/usr/bin"  # Menggunakan /usr/bin untuk menyalin file eksekusi secara global
 
 # Memeriksa apakah Go sudah terpasang
 if ! command -v go &> /dev/null; then
@@ -29,7 +29,7 @@ if [ ! -f "staging.sh" ]; then
     exit 1
 fi
 
-# Menyalin staging.sh ke /usr/local/bin (agar bisa diakses di seluruh sistem)
+# Menyalin staging.sh ke /usr/bin/staging (untuk akses global)
 echo "Menyalin staging.sh ke $BIN_DIR/staging..."
 sudo cp staging.sh "$BIN_DIR/staging"
 
