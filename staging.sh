@@ -32,6 +32,36 @@ display_help() {
     exit 0
 }
 
+# Mendapatkan direktori home pengguna
+home_dir=$(eval echo ~"$USER")
+
+# Ekstensi yang dikecualikan
+excluded_extentions="png,jpg,gif,jpeg,swf,woff,svg,pdf,json,css,js,webp,woff,woff2,eot,ttf,otf,mp4,txt"
+
+# Memeriksa apakah ParamSpider sudah terpasang
+if [ ! -d "$home_dir/ParamSpider" ]; then
+    echo "Meng-clone ParamSpider..."
+    git clone https://github.com/mas4ji/ParamSpider "$home_dir/ParamSpider"
+fi
+
+# Memeriksa apakah template Nuclei sudah terpasang
+if [ ! -d "$home_dir/nuclei-templates" ]; then
+    echo "Meng-clone nuclei-templates..."
+    git clone https://github.com/projectdiscovery/nuclei-templates.git "$home_dir/nuclei-templates"
+fi
+
+# Memeriksa apakah Nuclei sudah terpasang
+if ! command -v nuclei &> /dev/null; then
+    echo "Menginstal Nuclei..."
+    go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+fi
+
+# Memeriksa apakah httpx sudah terpasang
+if ! command -v httpx &> /dev/null; then
+    echo "Menginstal httpx..."
+    go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
+fi
+
 # Parsing argumen baris perintah
 while [[ $# -gt 0 ]]
 do
@@ -72,22 +102,21 @@ output_file="output/allurls.yaml"
 
 # Langkah 2: Menjalankan ParamSpider untuk mengumpulkan URL yang rentan
 if [ -n "$domain" ]; then
-    echo "Mohon ditunggu, sedang mengumpulkan URL untuk domain $domain..."
     if [ "$parallel_mode" = true ]; then
         echo "Menjalankan ParamSpider secara paralel pada domain $domain"
-        parallel -j 4 python3 "$home_dir/ParamSpider/paramspider.py" -d "$domain" --exclude "$excluded_extentions" --level high --quiet -o "output/$domain.yaml" && echo -e "${GREEN}Proses selesai, URL ditemukan!${RESET}"
+        echo "$domain" | parallel -j 4 python3 "$home_dir/ParamSpider/paramspider.py" -d {} --exclude "$excluded_extentions" --level high --quiet -o "output/{}.yaml"
     else
-        echo "Menjalankan ParamSpider pada domain $domain"
-        python3 "$home_dir/ParamSpider/paramspider.py" -d "$domain" --exclude "$excluded_extentions" --level high --quiet -o "output/$domain.yaml" && echo -e "${GREEN}Proses selesai, URL ditemukan!${RESET}"
+        echo "Menjalankan ParamSpider pada $domain"
+        python3 "$home_dir/ParamSpider/paramspider.py" -d "$domain" --exclude "$excluded_extentions" --level high --quiet -o "output/$domain.yaml"
     fi
 elif [ -n "$filename" ]; then
-    echo "Mohon ditunggu, sedang mengumpulkan URL dari file $filename..."
+    echo "Menjalankan ParamSpider pada URL dari $filename"
     while IFS= read -r line; do
-        echo "Menjalankan ParamSpider pada domain $line"
         if [ "$parallel_mode" = true ]; then
-            parallel -j 4 python3 "$home_dir/ParamSpider/paramspider.py" -d "$line" --exclude "$excluded_extentions" --level high --quiet -o "output/${line}.yaml" && echo -e "${GREEN}Proses selesai, URL ditemukan untuk $line!${RESET}"
+            # Menjalankan ParamSpider secara paralel untuk setiap domain
+            echo "$line" | parallel -j 4 python3 "$home_dir/ParamSpider/paramspider.py" -d {} --exclude "$excluded_extentions" --level high --quiet -o "output/{}.yaml"
         else
-            python3 "$home_dir/ParamSpider/paramspider.py" -d "$line" --exclude "$excluded_extentions" --level high --quiet -o "output/${line}.yaml" && echo -e "${GREEN}Proses selesai, URL ditemukan untuk $line!${RESET}"
+            python3 "$home_dir/ParamSpider/paramspider.py" -d "$line" --exclude "$excluded_extentions" --level high --quiet -o "output/${line}.yaml"
         fi
         cat "output/${line}.yaml" >> "$output_file"  # Menambahkan ke file output gabungan
     done < "$filename"
