@@ -102,6 +102,15 @@ do
     esac
 done
 
+# Langkah 1: Meminta pengguna memasukkan domain atau file
+if [ -z "$domain" ] && [ -z "$filename" ] && [ -z "$automated_mode" ]; then
+    echo "Harap berikan domain dengan opsi -d atau file dengan opsi -f."
+    display_help
+fi
+
+# Memastikan direktori output ada
+mkdir -p output
+
 # Langkah 2: Menjalankan alur otomatis jika -o digunakan
 if [ "$automated_mode" = true ]; then
     if [ -z "$domain" ]; then
@@ -111,10 +120,8 @@ if [ "$automated_mode" = true ]; then
     echo "Menjalankan Subfinder untuk mencari subdomain dari $domain..."
     subfinder -d "$domain" -o "output/$domain_subdomains.txt"
 
-    # Menampilkan pesan hanya sekali bahwa pemindaian dengan ParamSpider sedang dilakukan
-    echo "Mohon ditunggu, sedang melakukan pemindaian dengan ParamSpider (dalam proses scanning banyak domain)..."
-
-    # Jalankan ParamSpider untuk setiap subdomain dengan paralel, tanpa menampilkan output individu
+    echo "Menjalankan ParamSpider untuk mencari parameter dari subdomain yang ditemukan..."
+    echo "Mohon ditunggu, sedang melakukan pemindaian dengan ParamSpider..."
     cat "output/$domain_subdomains.txt" | parallel -j 4 python3 "$home_dir/ParamSpider/paramspider.py" -d {} --exclude "$excluded_extentions" --level high --quiet -o "output/{}.yaml"
 
     # Gabungkan hasil ParamSpider ke file output gabungan
@@ -122,10 +129,10 @@ if [ "$automated_mode" = true ]; then
         cat "output/${line}.yaml" >> "output/allurls.yaml"
     done
 
-    echo "Menjalankan Nuclei pada URL yang dikumpulkan..."
+    echo "Menjalankan Nuclei pada URL yang dikumpulkan secara paralel..."
     temp_file=$(mktemp)
     sort "output/allurls.yaml" > "$temp_file"
-    httpx -silent -mc 200,301,302,403 -l "$temp_file" | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05
+    cat "$temp_file" | parallel -j 10 "httpx -silent -mc 200,301,302,403 -l {} | nuclei -t $home_dir/nuclei-templates -dast -rl 05"
     rm "$temp_file"
 fi
 
@@ -150,18 +157,21 @@ elif [ -n "$filename" ] && [ ! -s "output/allurls.yaml" ]; then
     exit 1
 fi
 
-# Langkah 5: Menjalankan template Nuclei pada URL yang dikumpulkan
-echo "Menjalankan Nuclei pada URL yang dikumpulkan"
+# Langkah 5: Menjalankan template Nuclei pada URL yang dikumpulkan secara paralel
+echo "Menjalankan Nuclei pada URL yang dikumpulkan secara paralel..."
 temp_file=$(mktemp)
 if [ -n "$domain" ]; then
     # Menggunakan file sementara untuk menyimpan URL yang sudah diurutkan dan unik
     sort "output/$domain.yaml" > "$temp_file"
-    httpx -silent -mc 200,301,302,403 -l "$temp_file" | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05
+    cat "$temp_file" | parallel -j 10 "httpx -silent -mc 200,301,302,403 -l {} | nuclei -t $home_dir/nuclei-templates -dast -rl 05"
 elif [ -n "$filename" ]; then
+    # Menggunakan file sementara untuk menyimpan URL yang sudah diurutkan dan unik
     sort "output/allurls.yaml" > "$temp_file"
-    httpx -silent -mc 200,301,302,403 -l "$temp_file" | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05
+    cat "$temp_file" | parallel -j 10 "httpx -silent -mc 200,301,302,403 -l {} | nuclei -t $home_dir/nuclei-templates -dast -rl 05"
 fi
-rm "$temp_file"  # Menghapus file sementara
+
+# Menghapus file sementara setelah selesai
+rm "$temp_file"
 
 # Langkah 6: Menyelesaikan pemindaian
 echo "Pemindaian selesai - Selamat Fuzzing"
