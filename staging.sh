@@ -28,7 +28,7 @@ display_help() {
     echo "  -h, --help              Menampilkan informasi bantuan"
     echo "  -d, --domain <domain>   Satu domain untuk dipindai kerentanannya XSS, SQLi, SSRF, Open-Redirect, dll."
     echo "  -f, --file <filename>   File yang berisi beberapa domain/URL untuk dipindai"
-    echo "  -x                       Mengaktifkan penggunaan GNU Parallel"
+    echo "  -x, --parallel          Mengaktifkan paralelisasi untuk ParamSpider dan Nuclei"
     exit 0
 }
 
@@ -36,7 +36,7 @@ display_help() {
 home_dir=$(eval echo ~"$USER")
 
 # Ekstensi yang dikecualikan
-excluded_extentions="png,jpg,gif,jpeg,swf,woff,svg,pdf,json,css,js,webp,woff2,eot,ttf,otf,mp4,txt"
+excluded_extentions="png,jpg,gif,jpeg,swf,woff,svg,pdf,json,css,js,webp,woff,woff2,eot,ttf,otf,mp4,txt"
 
 # Memeriksa apakah ParamSpider sudah terpasang
 if [ ! -d "$home_dir/ParamSpider" ]; then
@@ -62,14 +62,8 @@ if ! command -v httpx &> /dev/null; then
     go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
 fi
 
-# Memeriksa apakah parallel harus diinstal berdasarkan flag -x
-if [[ "$1" == "-x" ]] && ! command -v parallel &> /dev/null; then
-    echo "Menginstal GNU Parallel..."
-    sudo apt install parallel
-fi
-
 # Parsing argumen baris perintah
-while [[ $# -gt 0 ]];
+while [[ $# -gt 0 ]]
 do
     key="$1"
     case $key in
@@ -86,11 +80,11 @@ do
             shift
             shift
             ;;
-        -x)
-            enable_parallel=true
+        -x|--parallel)
+            parallel_mode=true
             shift
             ;;
-        * )
+        *)
             echo "Opsi tidak dikenal: $key"
             display_help
             ;;
@@ -109,13 +103,26 @@ output_file="output/allurls.yaml"
 # Langkah 2: Menjalankan ParamSpider untuk mengumpulkan URL yang rentan
 if [ -n "$domain" ]; then
     echo "Menjalankan ParamSpider pada $domain"
-    python3 "$home_dir/ParamSpider/paramspider.py" -d "$domain" --exclude "$excluded_extentions" --level high --quiet -o "output/$domain.yaml"
+    if [ "$parallel_mode" = true ]; then
+        python3 "$home_dir/ParamSpider/paramspider.py" -d "$domain" --exclude "$excluded_extentions" --level high --quiet -o "output/$domain.yaml" &
+    else
+        python3 "$home_dir/ParamSpider/paramspider.py" -d "$domain" --exclude "$excluded_extentions" --level high --quiet -o "output/$domain.yaml"
+    fi
 elif [ -n "$filename" ]; then
     echo "Menjalankan ParamSpider pada URL dari $filename"
     while IFS= read -r line; do
-        python3 "$home_dir/ParamSpider/paramspider.py" -d "$line" --exclude "$excluded_extentions" --level high --quiet -o "output/${line}.yaml"
+        if [ "$parallel_mode" = true ]; then
+            python3 "$home_dir/ParamSpider/paramspider.py" -d "$line" --exclude "$excluded_extentions" --level high --quiet -o "output/${line}.yaml" &
+        else
+            python3 "$home_dir/ParamSpider/paramspider.py" -d "$line" --exclude "$excluded_extentions" --level high --quiet -o "output/${line}.yaml"
+        fi
         cat "output/${line}.yaml" >> "$output_file"  # Menambahkan ke file output gabungan
     done < "$filename"
+fi
+
+# Tunggu semua proses selesai jika menggunakan parallel
+if [ "$parallel_mode" = true ]; then
+    wait
 fi
 
 # Langkah 3: Memeriksa apakah URL ditemukan
@@ -130,23 +137,22 @@ fi
 # Langkah 4: Menjalankan template Nuclei pada URL yang dikumpulkan
 echo "Menjalankan Nuclei pada URL yang dikumpulkan"
 temp_file=$(mktemp)
-
-# Mengecek apakah parallel diaktifkan
-if [ "$enable_parallel" = true ]; then
-    echo "Menjalankan httpx dan nuclei dengan paralel..."
-    if [ -n "$domain" ]; then
-        sort "output/$domain.yaml" | httpx -silent -mc 200,301,302,403 | parallel -j 10 nuclei -t "$home_dir/nuclei-templates" -dast -rl 05
-    elif [ -n "$filename" ]; then
-        sort "$output_file" | httpx -silent -mc 200,301,302,403 | parallel -j 10 nuclei -t "$home_dir/nuclei-templates" -dast -rl 05
+if [ -n "$domain" ]; then
+    sort "output/$domain.yaml" > "$temp_file"
+    if [ "$parallel_mode" = true ]; then
+        cat "$temp_file" | parallel -j 10 -X httpx -silent -mc 200,301,302,403 -l {} | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05 &
+    else
+        httpx -silent -mc 200,301,302,403 -l "$temp_file" | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05
     fi
-else
-    echo "Menjalankan httpx dan nuclei tanpa paralel..."
-    if [ -n "$domain" ]; then
-        sort "output/$domain.yaml" | httpx -silent -mc 200,301,302,403 | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05
-    elif [ -n "$filename" ]; then
-        sort "$output_file" | httpx -silent -mc 200,301,302,403 | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05
+elif [ -n "$filename" ]; then
+    sort "$output_file" > "$temp_file"
+    if [ "$parallel_mode" = true ]; then
+        cat "$temp_file" | parallel -j 10 -X httpx -silent -mc 200,301,302,403 -l {} | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05 &
+    else
+        httpx -silent -mc 200,301,302,403 -l "$temp_file" | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05
     fi
 fi
+rm "$temp_file"  # Menghapus file sementara
 
 # Langkah 5: Menyelesaikan pemindaian
 echo "Pemindaian selesai - Selamat Fuzzing"
