@@ -1,4 +1,4 @@
-#!/bin/bash 
+#!/bin/bash
 
 # ANSI color codes
 GREEN='\033[92m'
@@ -28,7 +28,6 @@ display_help() {
     echo "  -h, --help              Menampilkan informasi bantuan"
     echo "  -d, --domain <domain>   Satu domain untuk dipindai kerentanannya XSS, SQLi, SSRF, Open-Redirect, dll."
     echo "  -f, --file <filename>   File yang berisi beberapa domain/URL untuk dipindai"
-    echo "  -X, --parallel          Jalankan pemindaian secara paralel untuk beberapa domain"
     exit 0
 }
 
@@ -62,8 +61,13 @@ if ! command -v httpx &> /dev/null; then
     go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
 fi
 
+# Memeriksa apakah parallel sudah terpasang (optional, untuk kontrol paralel lebih lanjut)
+if ! command -v parallel &> /dev/null; then
+    echo "Menginstal GNU Parallel..."
+    sudo apt install parallel
+fi
+
 # Parsing argumen baris perintah
-parallel=false
 while [[ $# -gt 0 ]]
 do
     key="$1"
@@ -81,11 +85,7 @@ do
             shift
             shift
             ;;
-        -X|--parallel)
-            parallel=true
-            shift
-            ;;
-        *)
+        * )
             echo "Opsi tidak dikenal: $key"
             display_help
             ;;
@@ -102,33 +102,15 @@ fi
 output_file="output/allurls.yaml"
 
 # Langkah 2: Menjalankan ParamSpider untuk mengumpulkan URL yang rentan
-run_paramspider() {
-    local domain=$1
+if [ -n "$domain" ]; then
     echo "Menjalankan ParamSpider pada $domain"
     python3 "$home_dir/ParamSpider/paramspider.py" -d "$domain" --exclude "$excluded_extentions" --level high --quiet -o "output/$domain.yaml"
-}
-
-if [ -n "$domain" ]; then
-    if [ "$parallel" = true ]; then
-        # Menjalankan ParamSpider secara paralel untuk satu domain jika -X diaktifkan
-        run_paramspider "$domain" &
-        wait  # Menunggu agar semua proses selesai
-    else
-        run_paramspider "$domain"
-    fi
 elif [ -n "$filename" ]; then
     echo "Menjalankan ParamSpider pada URL dari $filename"
-    if [ "$parallel" = true ]; then
-        while IFS= read -r line; do
-            run_paramspider "$line" &
-        done < "$filename"
-        wait  # Menunggu agar semua proses selesai
-    else
-        while IFS= read -r line; do
-            run_paramspider "$line"
-            cat "output/${line}.yaml" >> "$output_file"  # Menambahkan ke file output gabungan
-        done < "$filename"
-    fi
+    while IFS= read -r line; do
+        python3 "$home_dir/ParamSpider/paramspider.py" -d "$line" --exclude "$excluded_extentions" --level high --quiet -o "output/${line}.yaml"
+        cat "output/${line}.yaml" >> "$output_file"  # Menambahkan ke file output gabungan
+    done < "$filename"
 fi
 
 # Langkah 3: Memeriksa apakah URL ditemukan
@@ -144,13 +126,11 @@ fi
 echo "Menjalankan Nuclei pada URL yang dikumpulkan"
 temp_file=$(mktemp)
 if [ -n "$domain" ]; then
-    sort "output/$domain.yaml" > "$temp_file"
-    httpx -silent -mc 200,301,302,403 -l "$temp_file" | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05
+    # Menyaring dan mengurutkan URL yang ditemukan, kemudian menjalankan httpx dan Nuclei secara paralel
+    sort "output/$domain.yaml" | httpx -silent -mc 200,301,302,403 | parallel -j 10 nuclei -t "$home_dir/nuclei-templates" -dast -rl 05
 elif [ -n "$filename" ]; then
-    sort "$output_file" > "$temp_file"
-    httpx -silent -mc 200,301,302,403 -l "$temp_file" | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05
+    sort "$output_file" | httpx -silent -mc 200,301,302,403 | parallel -j 10 nuclei -t "$home_dir/nuclei-templates" -dast -rl 05
 fi
-rm "$temp_file"  # Menghapus file sementara
 
 # Langkah 5: Menyelesaikan pemindaian
 echo "Pemindaian selesai - Selamat Fuzzing"
