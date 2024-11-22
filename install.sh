@@ -22,11 +22,11 @@ fi
 
 # Menyalin file skrip utama (staging.sh) ke direktori /usr/bin dengan nama staging
 echo "Menyalin staging.sh ke /usr/bin/staging..."
-sudo cp staging.sh /usr/bin/staging
+cp staging.sh /usr/bin/staging
 
 # Memberikan izin eksekusi pada file tersebut
 echo "Memberikan izin eksekusi pada /usr/bin/staging..."
-sudo chmod u+x /usr/bin/staging
+chmod u+x /usr/bin/staging
 
 # Memeriksa apakah ParamSpider sudah terpasang
 if [ ! -d "$HOME/ParamSpider" ]; then
