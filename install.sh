@@ -6,11 +6,15 @@ if [ ! -f "staging.sh" ]; then
     exit 1
 fi
 
-# Menyalin file skrip utama (AjiFuzzer.sh) ke direktori /usr/bin dengan nama aji
-sudo cp staging.sh /usr/bin/staging
+# Tentukan direktori bin pengguna (dalam hal ini $HOME/bin)
+BIN_DIR="$HOME/bin"
+mkdir -p "$BIN_DIR"  # Membuat direktori bin jika belum ada
+
+# Menyalin file skrip utama (staging.sh) ke direktori bin dengan nama staging
+cp staging.sh "$BIN_DIR/staging"
 
 # Memberikan izin eksekusi pada file tersebut
-sudo chmod u+x /usr/bin/staging
+chmod u+x "$BIN_DIR/staging"
 
 # Menampilkan pesan sukses
-echo "AjiFuzzer telah berhasil diinstal! Sekarang Anda dapat menjalankan alat ini dengan perintah 'aji'."
+echo "AjiFuzzer telah berhasil diinstal! Sekarang Anda dapat menjalankan alat ini dengan perintah 'staging'."
