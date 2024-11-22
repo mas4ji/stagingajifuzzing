@@ -10,6 +10,8 @@ if ! command -v go &> /dev/null; then
         echo "Gagal menginstal Go. Pastikan Anda memiliki akses root dan koneksi internet."
         exit 1
     fi
+else
+    echo "Go sudah terpasang."
 fi
 
 # Memeriksa apakah file skrip utama (misalnya staging.sh) ada
@@ -31,7 +33,7 @@ if [ ! -d "$HOME/ParamSpider" ]; then
     echo "Meng-clone ParamSpider..."
     git clone https://github.com/mas4ji/ParamSpider "$HOME/ParamSpider"
 else
-    echo "ParamSpider sudah terpasang."
+    echo "ParamSpider sudah terpasang di $HOME/ParamSpider"
 fi
 
 # Memeriksa apakah template Nuclei sudah terpasang
@@ -39,7 +41,7 @@ if [ ! -d "$HOME/nuclei-templates" ]; then
     echo "Meng-clone nuclei-templates..."
     git clone https://github.com/projectdiscovery/nuclei-templates.git "$HOME/nuclei-templates"
 else
-    echo "nuclei-templates sudah terpasang."
+    echo "nuclei-templates sudah terpasang di $HOME/nuclei-templates"
 fi
 
 # Memeriksa apakah Nuclei sudah terpasang
@@ -68,4 +70,5 @@ else
 fi
 
 # Menampilkan pesan sukses
-echo "Staging telah berhasil diinstal! Sekarang Anda dapat menjalankan alat ini dengan perintah 'staging'."
+echo "Instalasi selesai! Semua dependensi telah terpasang dengan benar."
+echo "Anda dapat menjalankan alat ini dengan perintah 'staging'."
