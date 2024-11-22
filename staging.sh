@@ -102,15 +102,6 @@ do
     esac
 done
 
-# Langkah 1: Meminta pengguna memasukkan domain atau file
-if [ -z "$domain" ] && [ -z "$filename" ] && [ -z "$automated_mode" ]; then
-    echo "Harap berikan domain dengan opsi -d atau file dengan opsi -f."
-    display_help
-fi
-
-# Memastikan direktori output ada
-mkdir -p output
-
 # Langkah 2: Menjalankan alur otomatis jika -o digunakan
 if [ "$automated_mode" = true ]; then
     if [ -z "$domain" ]; then
@@ -120,7 +111,10 @@ if [ "$automated_mode" = true ]; then
     echo "Menjalankan Subfinder untuk mencari subdomain dari $domain..."
     subfinder -d "$domain" -o "output/$domain_subdomains.txt"
 
-    echo "Menjalankan ParamSpider untuk mencari parameter dari subdomain yang ditemukan..."
+    # Menampilkan pesan hanya sekali bahwa pemindaian dengan ParamSpider sedang dilakukan
+    echo "Mohon ditunggu, sedang melakukan pemindaian dengan ParamSpider (dalam proses scanning banyak domain)..."
+
+    # Jalankan ParamSpider untuk setiap subdomain dengan paralel, tanpa menampilkan output individu
     cat "output/$domain_subdomains.txt" | parallel -j 4 python3 "$home_dir/ParamSpider/paramspider.py" -d {} --exclude "$excluded_extentions" --level high --quiet -o "output/{}.yaml"
 
     # Gabungkan hasil ParamSpider ke file output gabungan
