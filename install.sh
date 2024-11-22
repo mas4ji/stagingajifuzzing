@@ -1,7 +1,8 @@
 #!/bin/bash
 
-# Menentukan direktori instalasi
-BIN_DIR="/usr/bin"  # Menyalin file eksekusi langsung ke /usr/bin untuk akses global
+# Menentukan direktori instalasi di dalam HOME pengguna
+HOME_DIR="$HOME"
+BIN_DIR="/usr/bin"  # Menggunakan /usr/bin untuk menyalin file eksekusi secara global
 
 # Memeriksa apakah Go sudah terpasang
 if ! command -v go &> /dev/null; then
@@ -20,6 +21,12 @@ if ! command -v go &> /dev/null; then
     fi
 else
     echo "Go sudah terpasang."
+fi
+
+# Menghapus file lama jika ada di /usr/bin/staging
+if [ -f "$BIN_DIR/staging" ]; then
+    echo "Menghapus file lama staging di $BIN_DIR/staging..."
+    sudo rm "$BIN_DIR/staging"
 fi
 
 # Memeriksa apakah file staging.sh ada di direktori saat ini
@@ -44,19 +51,19 @@ if ! echo "$PATH" | grep -q "$BIN_DIR"; then
 fi
 
 # Memeriksa apakah ParamSpider sudah terpasang
-if [ ! -d "$HOME/ParamSpider" ]; then
+if [ ! -d "$HOME_DIR/ParamSpider" ]; then
     echo "Meng-clone ParamSpider..."
-    git clone https://github.com/mas4ji/ParamSpider "$HOME/ParamSpider"
+    git clone https://github.com/mas4ji/ParamSpider "$HOME_DIR/ParamSpider"
 else
-    echo "ParamSpider sudah terpasang di $HOME/ParamSpider"
+    echo "ParamSpider sudah terpasang di $HOME_DIR/ParamSpider"
 fi
 
 # Memeriksa apakah template Nuclei sudah terpasang
-if [ ! -d "$HOME/nuclei-templates" ]; then
+if [ ! -d "$HOME_DIR/nuclei-templates" ]; then
     echo "Meng-clone nuclei-templates..."
-    git clone https://github.com/projectdiscovery/nuclei-templates.git "$HOME/nuclei-templates"
+    git clone https://github.com/projectdiscovery/nuclei-templates.git "$HOME_DIR/nuclei-templates"
 else
-    echo "nuclei-templates sudah terpasang di $HOME/nuclei-templates"
+    echo "nuclei-templates sudah terpasang di $HOME_DIR/nuclei-templates"
 fi
 
 # Memeriksa apakah Nuclei sudah terpasang
