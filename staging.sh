@@ -28,7 +28,7 @@ display_help() {
     echo "  -h, --help              Menampilkan informasi bantuan"
     echo "  -d, --domain <domain>   Satu domain untuk dipindai kerentanannya XSS, SQLi, SSRF, Open-Redirect, dll."
     echo "  -f, --file <filename>   File yang berisi beberapa domain/URL untuk dipindai"
-    echo "  -x, --parallel          Mengaktifkan paralelisasi untuk ParamSpider dan Nuclei"
+    echo "  -x, --parallel          Mengaktifkan paralelisasi hanya untuk ParamSpider"
     exit 0
 }
 
@@ -102,27 +102,24 @@ output_file="output/allurls.yaml"
 
 # Langkah 2: Menjalankan ParamSpider untuk mengumpulkan URL yang rentan
 if [ -n "$domain" ]; then
-    echo "Menjalankan ParamSpider pada $domain"
     if [ "$parallel_mode" = true ]; then
-        python3 "$home_dir/ParamSpider/paramspider.py" -d "$domain" --exclude "$excluded_extentions" --level high --quiet -o "output/$domain.yaml" &
+        echo "Menjalankan ParamSpider secara paralel pada domain $domain"
+        parallel -j 4 python3 "$home_dir/ParamSpider/paramspider.py" -d "$domain" --exclude "$excluded_extentions" --level high --quiet -o "output/$domain.yaml"
     else
+        echo "Menjalankan ParamSpider pada $domain"
         python3 "$home_dir/ParamSpider/paramspider.py" -d "$domain" --exclude "$excluded_extentions" --level high --quiet -o "output/$domain.yaml"
     fi
 elif [ -n "$filename" ]; then
     echo "Menjalankan ParamSpider pada URL dari $filename"
     while IFS= read -r line; do
         if [ "$parallel_mode" = true ]; then
-            python3 "$home_dir/ParamSpider/paramspider.py" -d "$line" --exclude "$excluded_extentions" --level high --quiet -o "output/${line}.yaml" &
+            # Menjalankan ParamSpider secara paralel untuk setiap domain
+            parallel -j 4 python3 "$home_dir/ParamSpider/paramspider.py" -d "$line" --exclude "$excluded_extentions" --level high --quiet -o "output/${line}.yaml"
         else
             python3 "$home_dir/ParamSpider/paramspider.py" -d "$line" --exclude "$excluded_extentions" --level high --quiet -o "output/${line}.yaml"
         fi
         cat "output/${line}.yaml" >> "$output_file"  # Menambahkan ke file output gabungan
     done < "$filename"
-fi
-
-# Tunggu semua proses selesai jika menggunakan parallel
-if [ "$parallel_mode" = true ]; then
-    wait
 fi
 
 # Langkah 3: Memeriksa apakah URL ditemukan
@@ -138,19 +135,12 @@ fi
 echo "Menjalankan Nuclei pada URL yang dikumpulkan"
 temp_file=$(mktemp)
 if [ -n "$domain" ]; then
+    # Menggunakan file sementara untuk menyimpan URL yang sudah diurutkan dan unik
     sort "output/$domain.yaml" > "$temp_file"
-    if [ "$parallel_mode" = true ]; then
-        cat "$temp_file" | parallel -j 10 -X httpx -silent -mc 200,301,302,403 -l {} | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05 &
-    else
-        httpx -silent -mc 200,301,302,403 -l "$temp_file" | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05
-    fi
+    httpx -silent -mc 200,301,302,403 -l "$temp_file" | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05
 elif [ -n "$filename" ]; then
     sort "$output_file" > "$temp_file"
-    if [ "$parallel_mode" = true ]; then
-        cat "$temp_file" | parallel -j 10 -X httpx -silent -mc 200,301,302,403 -l {} | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05 &
-    else
-        httpx -silent -mc 200,301,302,403 -l "$temp_file" | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05
-    fi
+    httpx -silent -mc 200,301,302,403 -l "$temp_file" | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05
 fi
 rm "$temp_file"  # Menghapus file sementara
 
