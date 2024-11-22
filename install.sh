@@ -39,8 +39,11 @@ echo "Memberikan izin eksekusi pada $BIN_DIR/staging..."
 chmod +x "$BIN_DIR/staging"
 
 # Memastikan bin berada dalam PATH
-echo "export PATH=\$PATH:$BIN_DIR" >> "$HOME_DIR/.bashrc"
-source "$HOME_DIR/.bashrc"
+if ! grep -q "$BIN_DIR" "$HOME_DIR/.bashrc"; then
+    echo "Menambahkan $BIN_DIR ke PATH dalam $HOME_DIR/.bashrc..."
+    echo "export PATH=\$PATH:$BIN_DIR" >> "$HOME_DIR/.bashrc"
+    source "$HOME_DIR/.bashrc"
+fi
 
 # Memeriksa apakah ParamSpider sudah terpasang
 if [ ! -d "$HOME_DIR/ParamSpider" ]; then
