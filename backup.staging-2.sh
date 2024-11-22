@@ -126,6 +126,8 @@ if [ "$automated_mode" = true ]; then
     # Gabungkan hasil ParamSpider ke file output gabungan
     cat "output/$domain_subdomains.txt" | while IFS= read -r line; do
         cat "output/${line}.yaml" >> "output/allurls.yaml"
+        echo "Menunggu selama 20 detik sebelum melanjutkan..."
+        sleep 20  # Menunggu 20 detik setelah setiap domain dipindai
     done
 
     echo "Menjalankan Nuclei pada URL yang dikumpulkan..."
@@ -139,11 +141,23 @@ fi
 if [ -n "$domain" ] && [ -z "$automated_mode" ]; then
     echo "Menjalankan ParamSpider pada domain $domain"
     python3 "$home_dir/ParamSpider/paramspider.py" -d "$domain" --exclude "$excluded_extentions" --level high --quiet -o "output/$domain.yaml"
+    # Setelah satu domain dipindai, beri jeda 20 detik
+    echo "Menunggu selama 20 detik sebelum melanjutkan..."
+    sleep 20
 elif [ -n "$filename" ] && [ -z "$automated_mode" ]; then
     echo "Menjalankan ParamSpider pada URL dari $filename"
+    count=0
     while IFS= read -r line; do
         python3 "$home_dir/ParamSpider/paramspider.py" -d "$line" --exclude "$excluded_extentions" --level high --quiet -o "output/${line}.yaml"
         cat "output/${line}.yaml" >> "output/allurls.yaml"  # Menambahkan ke file output gabungan
+
+        # Setelah dua domain dipindai, beri jeda 20 detik
+        count=$((count + 1))
+        if [ $count -ge 2 ]; then
+            echo "Menunggu selama 20 detik sebelum melanjutkan..."
+            sleep 20
+            count=0
+        fi
     done < "$filename"
 fi
 
@@ -159,15 +173,21 @@ fi
 # Langkah 5: Menjalankan template Nuclei pada URL yang dikumpulkan
 echo "Menjalankan Nuclei pada URL yang dikumpulkan"
 temp_file=$(mktemp)
+count=0
 if [ -n "$domain" ]; then
     # Menggunakan file sementara untuk menyimpan URL yang sudah diurutkan dan unik
     sort "output/$domain.yaml" > "$temp_file"
     httpx -silent -mc 200,301,302,403 -l "$temp_file" | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05
+
+    # Setelah satu domain dipindai, beri jeda 20 detik
+    echo "Menunggu selama 20 detik sebelum melanjutkan..."
+    sleep 20
 elif [ -n "$filename" ]; then
     sort "output/allurls.yaml" > "$temp_file"
     httpx -silent -mc 200,301,302,403 -l "$temp_file" | nuclei -t "$home_dir/nuclei-templates" -dast -rl 05
 fi
 rm "$temp_file"  # Menghapus file sementara
+
 
 # Langkah 6: Menyelesaikan pemindaian
 echo "Pemindaian selesai - Selamat Fuzzing"
